@@ -4,6 +4,10 @@
     {
       "source": "/proxy",
       "destination": "/api/proxy"
+    },
+    {
+      "source": "/api/movies",
+      "destination": "/api/movies"
     }
   ],
   "headers": [
@@ -11,7 +15,7 @@
       "source": "/(.*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, HEAD, OPTIONS" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, HEAD, OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Range, Content-Type" },
         { "key": "Access-Control-Expose-Headers", "value": "Content-Length, Content-Range, Accept-Ranges" }
       ]

@@ -9,6 +9,55 @@ const url = require('url');
 const path = require('path');
 const fs = require('fs');
 
+// Supabase config (for local /api/movies endpoint)
+const SUPABASE_URL = 'https://caklaclowgwprjalnywk.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNha2xhY2xvd2d3cHJqYWxueXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2Nzg2NTQsImV4cCI6MjA4NDI1NDY1NH0.zuymyh5-5WcUKSDYs8aMcf98C5UfLHk14KtQ9jSVr3A';
+
+function supabaseRequest(method, apiPath, body = null) {
+    return new Promise((resolve, reject) => {
+        const fullUrl = new URL(SUPABASE_URL + apiPath);
+        const headers = {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+        };
+        if (method === 'POST') headers['Prefer'] = 'return=representation';
+
+        const options = {
+            hostname: fullUrl.hostname,
+            port: 443,
+            path: fullUrl.pathname + fullUrl.search,
+            method,
+            headers,
+            timeout: 15000
+        };
+
+        const req = https.request(options, (supaRes) => {
+            let data = '';
+            supaRes.on('data', chunk => data += chunk);
+            supaRes.on('end', () => {
+                try { resolve({ status: supaRes.statusCode, data: data ? JSON.parse(data) : {} }); }
+                catch (e) { resolve({ status: supaRes.statusCode, data }); }
+            });
+        });
+        req.on('timeout', () => { req.destroy(); reject(new Error('Supabase timeout')); });
+        req.on('error', reject);
+        if (body) req.write(JSON.stringify(body));
+        req.end();
+    });
+}
+
+function readBody(req) {
+    return new Promise((resolve) => {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try { resolve(JSON.parse(body)); }
+            catch { resolve({}); }
+        });
+    });
+}
+
 const PORT = 4000;
 
 // MIME types for serving static files
@@ -29,7 +78,7 @@ const server = http.createServer(async (req, res) => {
     
     // Add CORS headers to all responses
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
     
@@ -37,6 +86,51 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(200);
         res.end();
+        return;
+    }
+
+    // Movies API: /api/movies
+    if (pathname === '/api/movies') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            if (req.method === 'GET') {
+                const search = parsedUrl.query.search || '';
+                const limit = parseInt(parsedUrl.query.limit) || 20;
+                const offset = parseInt(parsedUrl.query.offset) || 0;
+                let apiPath;
+                if (search.trim()) {
+                    apiPath = `/rest/v1/movies?title=ilike.${encodeURIComponent('%' + search.trim() + '%')}&select=id,title,link&order=title.asc&limit=${limit}&offset=${offset}`;
+                } else {
+                    apiPath = `/rest/v1/movies?select=id,title,link&order=id.desc&limit=${limit}&offset=${offset}`;
+                }
+                const result = await supabaseRequest('GET', apiPath);
+                res.writeHead(200);
+                res.end(JSON.stringify({ success: true, movies: Array.isArray(result.data) ? result.data : [], count: Array.isArray(result.data) ? result.data.length : 0 }));
+            } else if (req.method === 'POST') {
+                const body = await readBody(req);
+                const { title, link } = body;
+                if (!title || !link) {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ success: false, error: 'Both title and link are required' }));
+                    return;
+                }
+                const result = await supabaseRequest('POST', '/rest/v1/movies', { title: title.trim(), link: link.trim() });
+                if (result.status >= 200 && result.status < 300) {
+                    res.writeHead(201);
+                    res.end(JSON.stringify({ success: true, message: 'Movie added successfully' }));
+                } else {
+                    res.writeHead(result.status);
+                    res.end(JSON.stringify({ success: false, error: 'Failed to add movie', details: result.data }));
+                }
+            } else {
+                res.writeHead(405);
+                res.end(JSON.stringify({ error: 'Method not allowed' }));
+            }
+        } catch (err) {
+            console.error('Movies API error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
         return;
     }
     

@@ -1246,6 +1246,7 @@ class StreamFlowPlayer {
 // Initialize player when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     window.streamFlow = new StreamFlowPlayer();
+    window.movieLibrary = new MovieLibrary(window.streamFlow);
 });
 
 // Service Worker for offline support (optional enhancement)
@@ -1254,3 +1255,423 @@ if ('serviceWorker' in navigator) {
     // navigator.serviceWorker.register('/sw.js');
 }
 
+/**
+ * Movie Library Manager
+ * Handles search from Supabase database and adding new movies
+ */
+class MovieLibrary {
+    constructor(player) {
+        this.player = player;
+
+        // API base path
+        this.apiBase = window.location.hostname === 'localhost'
+            ? 'http://localhost:4000/api'
+            : '/api';
+
+        // Search elements
+        this.searchInput = document.getElementById('movieSearch');
+        this.searchResults = document.getElementById('searchResults');
+        this.searchSpinner = document.getElementById('searchSpinner');
+        this.searchWrapper = document.getElementById('searchWrapper');
+
+        // Add Movie Modal elements
+        this.addMovieBtn = document.getElementById('addMovieBtn');
+        this.addMovieModal = document.getElementById('addMovieModal');
+        this.closeAddMovie = document.getElementById('closeAddMovie');
+        this.addMovieForm = document.getElementById('addMovieForm');
+        this.movieTitleInput = document.getElementById('movieTitle');
+        this.movieLinkInput = document.getElementById('movieLink');
+        this.formStatus = document.getElementById('formStatus');
+        this.submitMovieBtn = document.getElementById('submitMovieBtn');
+
+        // Toast container
+        this.toastContainer = document.getElementById('toastContainer');
+
+        // Search state
+        this.searchTimeout = null;
+        this.searchAbortController = null;
+        this.lastQuery = '';
+
+        this.init();
+    }
+
+    init() {
+        this.bindSearchEvents();
+        this.bindModalEvents();
+    }
+
+    // ===========================
+    //  SEARCH FUNCTIONALITY
+    // ===========================
+
+    bindSearchEvents() {
+        // Live search with debounce
+        this.searchInput.addEventListener('input', () => {
+            this.debounceSearch();
+        });
+
+        // Show results on focus if there's text
+        this.searchInput.addEventListener('focus', () => {
+            const query = this.searchInput.value.trim();
+            if (query.length >= 2) {
+                this.debounceSearch();
+            }
+        });
+
+        // Close results when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!this.searchWrapper.contains(e.target)) {
+                this.hideSearchResults();
+            }
+        });
+
+        // Keyboard navigation for search results
+        this.searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.hideSearchResults();
+                this.searchInput.blur();
+            }
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.focusNextResult(1);
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.focusNextResult(-1);
+            }
+            if (e.key === 'Enter') {
+                const focused = this.searchResults.querySelector('.search-result-item.focused');
+                if (focused) {
+                    e.preventDefault();
+                    focused.click();
+                }
+            }
+        });
+    }
+
+    debounceSearch() {
+        clearTimeout(this.searchTimeout);
+        const query = this.searchInput.value.trim();
+
+        if (query.length < 2) {
+            this.hideSearchResults();
+            return;
+        }
+
+        this.searchTimeout = setTimeout(() => {
+            this.performSearch(query);
+        }, 300);
+    }
+
+    async performSearch(query) {
+        if (query === this.lastQuery) return;
+        this.lastQuery = query;
+
+        // Abort previous request
+        if (this.searchAbortController) {
+            this.searchAbortController.abort();
+        }
+        this.searchAbortController = new AbortController();
+
+        this.showSearchSpinner();
+
+        try {
+            const response = await fetch(
+                `${this.apiBase}/movies?search=${encodeURIComponent(query)}&limit=15`,
+                { signal: this.searchAbortController.signal }
+            );
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const data = await response.json();
+
+            if (data.success && data.movies) {
+                this.renderSearchResults(data.movies, query);
+            } else {
+                this.renderSearchError('Failed to search movies');
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') return; // Ignore aborted requests
+            console.error('Search error:', error);
+            this.renderSearchError('Search failed. Please try again.');
+        } finally {
+            this.hideSearchSpinner();
+        }
+    }
+
+    renderSearchResults(movies, query) {
+        this.searchResults.innerHTML = '';
+
+        if (movies.length === 0) {
+            this.searchResults.innerHTML = `
+                <div class="search-empty">
+                    No movies found matching "<strong>${this.escapeHtml(query)}</strong>"
+                    <span class="search-hint">Try a different title or add it to the library</span>
+                </div>
+            `;
+            this.showSearchResults();
+            return;
+        }
+
+        movies.forEach(movie => {
+            const item = document.createElement('div');
+            item.className = 'search-result-item';
+            item.dataset.link = movie.link;
+            item.dataset.title = movie.title;
+
+            // Highlight matching text
+            const highlightedTitle = this.highlightMatch(movie.title, query);
+
+            // Truncate link for display
+            const displayLink = this.truncateUrl(movie.link, 50);
+
+            item.innerHTML = `
+                <div class="result-icon">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <rect x="2" y="3" width="20" height="18" rx="3" stroke="currentColor" stroke-width="2"/>
+                        <path d="M10 14l4-2.5L10 9v5z" fill="currentColor"/>
+                    </svg>
+                </div>
+                <div class="result-info">
+                    <div class="result-title">${highlightedTitle}</div>
+                    <div class="result-link">${this.escapeHtml(displayLink)}</div>
+                </div>
+                <div class="result-play-icon">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M8 5.14v13.72a1 1 0 001.5.86l11-6.86a1 1 0 000-1.72l-11-6.86a1 1 0 00-1.5.86z" fill="currentColor"/>
+                    </svg>
+                </div>
+            `;
+
+            // Click to play
+            item.addEventListener('click', () => {
+                this.selectMovie(movie);
+            });
+
+            this.searchResults.appendChild(item);
+        });
+
+        this.showSearchResults();
+    }
+
+    selectMovie(movie) {
+        // Set the URL in the player input and start playing
+        this.player.urlInput.value = movie.link;
+        this.hideSearchResults();
+        this.searchInput.value = '';
+        this.lastQuery = '';
+
+        // Show toast
+        this.showToast('success', `Now playing: ${movie.title}`);
+
+        // Load the video
+        this.player.loadVideo();
+    }
+
+    highlightMatch(text, query) {
+        const escaped = this.escapeHtml(text);
+        const queryEscaped = this.escapeHtml(query);
+
+        // Case-insensitive highlight
+        const regex = new RegExp(`(${queryEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        return escaped.replace(regex, '<mark>$1</mark>');
+    }
+
+    truncateUrl(url, maxLen) {
+        if (url.length <= maxLen) return url;
+        return url.substring(0, maxLen - 3) + '...';
+    }
+
+    showSearchResults() {
+        this.searchResults.classList.add('active');
+    }
+
+    hideSearchResults() {
+        this.searchResults.classList.remove('active');
+    }
+
+    showSearchSpinner() {
+        this.searchSpinner.classList.add('active');
+    }
+
+    hideSearchSpinner() {
+        this.searchSpinner.classList.remove('active');
+    }
+
+    focusNextResult(direction) {
+        const items = Array.from(this.searchResults.querySelectorAll('.search-result-item'));
+        if (items.length === 0) return;
+
+        const currentIndex = items.findIndex(item => item.classList.contains('focused'));
+
+        // Remove current focus
+        items.forEach(item => item.classList.remove('focused'));
+
+        let nextIndex;
+        if (currentIndex === -1) {
+            nextIndex = direction > 0 ? 0 : items.length - 1;
+        } else {
+            nextIndex = currentIndex + direction;
+            if (nextIndex < 0) nextIndex = items.length - 1;
+            if (nextIndex >= items.length) nextIndex = 0;
+        }
+
+        items[nextIndex].classList.add('focused');
+        items[nextIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    renderSearchError(message) {
+        this.searchResults.innerHTML = `
+            <div class="search-error">
+                ${this.escapeHtml(message)}
+            </div>
+        `;
+        this.showSearchResults();
+    }
+
+    // ===========================
+    //  ADD MOVIE MODAL
+    // ===========================
+
+    bindModalEvents() {
+        // Open modal
+        this.addMovieBtn.addEventListener('click', () => {
+            this.openModal();
+        });
+
+        // Close modal
+        this.closeAddMovie.addEventListener('click', () => {
+            this.closeModal();
+        });
+
+        // Close on overlay click
+        this.addMovieModal.addEventListener('click', (e) => {
+            if (e.target === this.addMovieModal) {
+                this.closeModal();
+            }
+        });
+
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.addMovieModal.classList.contains('active')) {
+                this.closeModal();
+            }
+        });
+
+        // Form submission
+        this.addMovieForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleAddMovie();
+        });
+    }
+
+    openModal() {
+        this.addMovieModal.classList.add('active');
+        this.movieTitleInput.focus();
+        this.clearFormStatus();
+    }
+
+    closeModal() {
+        this.addMovieModal.classList.remove('active');
+        this.addMovieForm.reset();
+        this.clearFormStatus();
+    }
+
+    async handleAddMovie() {
+        const title = this.movieTitleInput.value.trim();
+        const link = this.movieLinkInput.value.trim();
+
+        if (!title || !link) {
+            this.setFormStatus('Please fill in both fields', 'error');
+            return;
+        }
+
+        // Validate URL
+        try {
+            new URL(link);
+        } catch {
+            this.setFormStatus('Please enter a valid URL', 'error');
+            return;
+        }
+
+        // Disable submit
+        this.submitMovieBtn.disabled = true;
+        this.setFormStatus('Adding movie...', 'loading');
+
+        try {
+            const response = await fetch(`${this.apiBase}/movies`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ title, link })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.setFormStatus('✓ Movie added successfully!', 'success');
+                this.showToast('success', `Added "${title}" to library`);
+
+                // Reset form after a brief moment
+                setTimeout(() => {
+                    this.addMovieForm.reset();
+                    this.clearFormStatus();
+                    this.closeModal();
+                }, 1200);
+            } else {
+                this.setFormStatus(data.error || 'Failed to add movie', 'error');
+                this.showToast('error', data.error || 'Failed to add movie');
+            }
+        } catch (error) {
+            console.error('Add movie error:', error);
+            this.setFormStatus('Network error. Please try again.', 'error');
+            this.showToast('error', 'Network error');
+        } finally {
+            this.submitMovieBtn.disabled = false;
+        }
+    }
+
+    setFormStatus(message, type) {
+        this.formStatus.textContent = message;
+        this.formStatus.className = `form-status ${type}`;
+    }
+
+    clearFormStatus() {
+        this.formStatus.textContent = '';
+        this.formStatus.className = 'form-status';
+    }
+
+    // ===========================
+    //  TOAST NOTIFICATIONS
+    // ===========================
+
+    showToast(type, message, duration = 4000) {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+
+        const icon = type === 'success' ? '✓' : '✕';
+
+        toast.innerHTML = `
+            <span class="toast-icon">${icon}</span>
+            <span>${this.escapeHtml(message)}</span>
+        `;
+
+        this.toastContainer.appendChild(toast);
+
+        setTimeout(() => {
+            toast.classList.add('removing');
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
+    // ===========================
+    //  UTILITIES
+    // ===========================
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}

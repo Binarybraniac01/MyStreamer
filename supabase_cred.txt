@@ -1,0 +1,15 @@
+Supabase database credentials :
+
+host: db.caklaclowgwprjalnywk.supabase.co
+port: 5432
+database: postgres
+user: postgres
+pass: Root@1234
+
+
+
+anon public key : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNha2xhY2xvd2d3cHJqYWxueXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2Nzg2NTQsImV4cCI6MjA4NDI1NDY1NH0.zuymyh5-5WcUKSDYs8aMcf98C5UfLHk14KtQ9jSVr3A
+
+
+publishable key : sb_publishable_WlDAsObHIVFW5rW7vectSA_6izAr7ve
+

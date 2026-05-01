@@ -34,14 +34,22 @@
                 </svg>
                 <span class="logo-text">MyStreamer</span>
             </div>
-            <div class="header-stats">
-                <div class="stat" id="bufferStat">
-                    <span class="stat-label">Buffer</span>
-                    <span class="stat-value" id="bufferPercent">0%</span>
-                </div>
-                <div class="stat" id="networkStat">
-                    <span class="stat-label">Speed</span>
-                    <span class="stat-value" id="networkSpeed">—</span>
+            <div class="header-actions">
+                <button class="add-movie-btn" id="addMovieBtn" title="Add Movie to Library">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>Add Movie</span>
+                </button>
+                <div class="header-stats">
+                    <div class="stat" id="bufferStat">
+                        <span class="stat-label">Buffer</span>
+                        <span class="stat-value" id="bufferPercent">0%</span>
+                    </div>
+                    <div class="stat" id="networkStat">
+                        <span class="stat-label">Speed</span>
+                        <span class="stat-value" id="networkSpeed">—</span>
+                    </div>
                 </div>
             </div>
         </header>
@@ -82,6 +90,26 @@
                         <span class="format-tag">OGG</span>
                         <span class="format-tag">HLS</span>
                         <span class="format-tag">DASH</span>
+                    </div>
+
+                    <!-- Movie Search -->
+                    <div class="search-section">
+                        <div class="search-divider">
+                            <span class="divider-line"></span>
+                            <span class="divider-text">or search library</span>
+                            <span class="divider-line"></span>
+                        </div>
+                        <div class="search-wrapper" id="searchWrapper">
+                            <div class="search-input-container">
+                                <svg class="search-icon" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
+                                    <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                </svg>
+                                <input type="text" id="movieSearch" class="search-input" placeholder="Search movies by title..." autocomplete="off" spellcheck="false">
+                                <div class="search-spinner" id="searchSpinner"></div>
+                            </div>
+                            <div class="search-results" id="searchResults"></div>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -309,6 +337,47 @@
                 <button class="close-shortcuts" id="closeShortcuts">Got it</button>
             </div>
         </div>
+
+        <!-- Add Movie Modal -->
+        <div class="modal-overlay" id="addMovieModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">
+                        <svg viewBox="0 0 24 24" fill="none" width="24" height="24">
+                            <rect x="2" y="3" width="20" height="18" rx="3" stroke="currentColor" stroke-width="2"/>
+                            <path d="M2 8h20" stroke="currentColor" stroke-width="2"/>
+                            <path d="M10 14l4-2.5L10 9v5z" fill="currentColor"/>
+                        </svg>
+                        Add Movie to Library
+                    </h3>
+                    <button class="modal-close" id="closeAddMovie">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+                <form class="modal-form" id="addMovieForm">
+                    <div class="form-group">
+                        <label for="movieTitle" class="form-label">Movie Title</label>
+                        <input type="text" id="movieTitle" class="form-input" placeholder="e.g. Interstellar (2014) – 1080p" required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="movieLink" class="form-label">Direct Video Link</label>
+                        <input type="url" id="movieLink" class="form-input" placeholder="https://example.com/movie.mp4" required autocomplete="off">
+                    </div>
+                    <div class="form-status" id="formStatus"></div>
+                    <button type="submit" class="form-submit" id="submitMovieBtn">
+                        <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span>Add to Library</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div class="toast-container" id="toastContainer"></div>
     </div>
 
     <script src="player.js"></script>
