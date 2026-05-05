@@ -2107,6 +2107,87 @@ body {
     font-weight: 600;
 }
 
+/* Subtitle Load Section */
+.subtitle-load-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.subtitle-file-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: rgba(123, 44, 191, 0.15);
+    border: 1px solid rgba(123, 44, 191, 0.3);
+    border-radius: var(--radius-sm);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--accent-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.subtitle-file-btn:hover {
+    background: rgba(123, 44, 191, 0.25);
+    border-color: var(--accent-secondary);
+    color: var(--text-primary);
+}
+
+.subtitle-file-btn svg {
+    flex-shrink: 0;
+    color: var(--accent-primary);
+}
+
+.subtitle-url-row {
+    display: flex;
+    gap: 4px;
+}
+
+.subtitle-url-input {
+    flex: 1;
+    padding: 6px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-sm);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-primary);
+    outline: none;
+    min-width: 0;
+}
+
+.subtitle-url-input:focus {
+    border-color: var(--accent-primary);
+}
+
+.subtitle-url-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.subtitle-url-go {
+    padding: 6px 10px;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--bg-deep);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.subtitle-url-go:hover {
+    background: #00dfc0;
+}
+
 /* ========================================
    Lock Overlay (MX Player Style)
    ======================================== */

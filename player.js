@@ -256,6 +256,33 @@ class StreamFlowPlayer {
         this.lockBtn.addEventListener('click', () => this.toggleLock());
         this.lockUnlockBtn.addEventListener('click', () => this.toggleLock());
 
+        // External subtitle file input
+        const subtitleFileInput = document.getElementById('subtitleFileInput');
+        if (subtitleFileInput) {
+            subtitleFileInput.addEventListener('change', (e) => {
+                e.stopPropagation();
+                this.loadSubtitleFile(e.target.files[0]);
+            });
+        }
+
+        // External subtitle URL
+        const subtitleUrlGo = document.getElementById('subtitleUrlGo');
+        const subtitleUrlInput = document.getElementById('subtitleUrlInput');
+        if (subtitleUrlGo && subtitleUrlInput) {
+            subtitleUrlGo.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.loadSubtitleFromUrl(subtitleUrlInput.value.trim());
+                subtitleUrlInput.value = '';
+            });
+            subtitleUrlInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.stopPropagation();
+                    this.loadSubtitleFromUrl(subtitleUrlInput.value.trim());
+                    subtitleUrlInput.value = '';
+                }
+            });
+            subtitleUrlInput.addEventListener('click', (e) => e.stopPropagation());
+        }
         // Shortcuts Modal
         this.closeShortcuts.addEventListener('click', () => {
             this.shortcutsModal.classList.remove('active');
@@ -357,9 +384,21 @@ class StreamFlowPlayer {
         // Buffer progress - fires when browser downloads more data
         this.video.addEventListener('progress', () => this.updateBuffer());
 
-        // Also update buffer on seeking
+        // Also update buffer on seeking + fix audio desync
         this.video.addEventListener('seeked', () => {
             this.updateBuffer();
+            // Force audio resync: pause/play cycle fixes decoder desync
+            if (!this.video.paused && !this.video.ended) {
+                this.video.pause();
+                requestAnimationFrame(() => {
+                    this.video.play().catch(() => {});
+                });
+            }
+        });
+
+        // Detect text tracks added asynchronously
+        this.video.textTracks.addEventListener('addtrack', () => {
+            this.populateSubtitles();
         });
 
         // Error handling
@@ -1292,7 +1331,7 @@ class StreamFlowPlayer {
 
         // Reset tracks UI
         this.audioTrackOptions.innerHTML = '<div class="settings-empty">No extra audio tracks</div>';
-        this.subtitleOptions.innerHTML = '<div class="settings-empty">No subtitles available</div>';
+        this.subtitleOptions.innerHTML = '<div class="settings-empty">No subtitles detected</div>';
     }
 
     // ===========================
@@ -1407,7 +1446,17 @@ class StreamFlowPlayer {
 
     populateAudioTracks() {
         const tracks = this.video.audioTracks;
-        if (!tracks || tracks.length <= 1) return;
+
+        // audioTracks API is not supported in Chrome/Firefox (Safari/Edge only)
+        if (!tracks) {
+            this.audioTrackOptions.innerHTML = '<div class="settings-empty">Audio track switching requires HLS streams or Safari browser</div>';
+            return;
+        }
+
+        if (tracks.length <= 1) {
+            this.audioTrackOptions.innerHTML = '<div class="settings-empty">Single audio track</div>';
+            return;
+        }
 
         this.audioTrackOptions.innerHTML = '';
         for (let i = 0; i < tracks.length; i++) {
@@ -1469,8 +1518,154 @@ class StreamFlowPlayer {
 
         // If only "Off" button exists, show no subtitles message
         if (this.subtitleOptions.children.length <= 1) {
-            this.subtitleOptions.innerHTML = '<div class="settings-empty">No subtitles available</div>';
+            this.subtitleOptions.innerHTML = '<div class="settings-empty">No subtitles detected</div>';
         }
+    }
+
+    // ===========================
+    //  EXTERNAL SUBTITLE LOADING
+    // ===========================
+
+    loadSubtitleFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            let content = e.target.result;
+            const name = file.name.replace(/\.[^.]+$/, '');
+
+            // Convert SRT to VTT if needed
+            if (file.name.endsWith('.srt')) {
+                content = this.srtToVtt(content);
+            } else if (file.name.endsWith('.ass') || file.name.endsWith('.ssa')) {
+                content = this.assToVtt(content);
+            }
+
+            this.addSubtitleTrack(content, name);
+        };
+        reader.readAsText(file);
+    }
+
+    async loadSubtitleFromUrl(url) {
+        if (!url) return;
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            let content = await response.text();
+            const name = url.split('/').pop().replace(/\.[^.]+$/, '') || 'External';
+
+            if (url.endsWith('.srt')) {
+                content = this.srtToVtt(content);
+            } else if (url.endsWith('.ass') || url.endsWith('.ssa')) {
+                content = this.assToVtt(content);
+            }
+
+            this.addSubtitleTrack(content, name);
+        } catch (err) {
+            console.error('Failed to load subtitle URL:', err);
+        }
+    }
+
+    srtToVtt(srt) {
+        // Convert SRT format to WebVTT
+        let vtt = 'WEBVTT\n\n';
+        // Normalize line endings
+        srt = srt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        // Replace SRT timestamp format (comma) with VTT format (dot)
+        vtt += srt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+        return vtt;
+    }
+
+    assToVtt(ass) {
+        // Basic ASS/SSA to VTT conversion
+        let vtt = 'WEBVTT\n\n';
+        const lines = ass.split(/\r?\n/);
+        let inEvents = false;
+        let formatFields = [];
+
+        for (const line of lines) {
+            if (line.trim().startsWith('[Events]')) {
+                inEvents = true;
+                continue;
+            }
+            if (line.trim().startsWith('[') && inEvents) break;
+
+            if (inEvents && line.startsWith('Format:')) {
+                formatFields = line.replace('Format:', '').split(',').map(f => f.trim().toLowerCase());
+                continue;
+            }
+
+            if (inEvents && line.startsWith('Dialogue:')) {
+                const values = line.replace('Dialogue:', '').split(',');
+                const startIdx = formatFields.indexOf('start');
+                const endIdx = formatFields.indexOf('end');
+                const textIdx = formatFields.indexOf('text');
+
+                if (startIdx >= 0 && endIdx >= 0 && textIdx >= 0) {
+                    const start = values[startIdx]?.trim();
+                    const end = values[endIdx]?.trim();
+                    // Text may contain commas, so join remaining
+                    const text = values.slice(textIdx).join(',').trim()
+                        .replace(/\\N/g, '\n')
+                        .replace(/\\n/g, '\n')
+                        .replace(/\{[^}]*\}/g, ''); // strip ASS style tags
+
+                    if (start && end && text) {
+                        // ASS uses H:MM:SS.cc, VTT uses HH:MM:SS.mmm
+                        const fmtTime = (t) => {
+                            const parts = t.split(':');
+                            if (parts.length === 3) {
+                                const h = parts[0].padStart(2, '0');
+                                const m = parts[1].padStart(2, '0');
+                                const sDot = parts[2].split('.');
+                                const s = sDot[0].padStart(2, '0');
+                                const ms = (sDot[1] || '0').padEnd(3, '0').slice(0, 3);
+                                return `${h}:${m}:${s}.${ms}`;
+                            }
+                            return t;
+                        };
+                        vtt += `${fmtTime(start)} --> ${fmtTime(end)}\n${text}\n\n`;
+                    }
+                }
+            }
+        }
+        return vtt;
+    }
+
+    addSubtitleTrack(vttContent, label) {
+        // Create a blob URL for the VTT content
+        const blob = new Blob([vttContent], { type: 'text/vtt' });
+        const url = URL.createObjectURL(blob);
+
+        // Remove any existing track elements we previously added
+        const existingTracks = this.video.querySelectorAll('track[data-external]');
+        existingTracks.forEach(t => t.remove());
+
+        // Add new track element
+        const trackEl = document.createElement('track');
+        trackEl.kind = 'subtitles';
+        trackEl.label = label || 'External';
+        trackEl.srclang = 'en';
+        trackEl.src = url;
+        trackEl.default = true;
+        trackEl.setAttribute('data-external', 'true');
+        this.video.appendChild(trackEl);
+
+        // Enable the new track after a tick (browser needs to parse it)
+        setTimeout(() => {
+            const tracks = this.video.textTracks;
+            // Disable all other tracks
+            for (let i = 0; i < tracks.length; i++) {
+                tracks[i].mode = 'disabled';
+            }
+            // Enable the last one (our new track)
+            if (tracks.length > 0) {
+                tracks[tracks.length - 1].mode = 'showing';
+            }
+            // Refresh the subtitle picker UI
+            this.populateSubtitles();
+        }, 100);
+
+        console.log(`📝 Loaded external subtitle: ${label}`);
     }
 
     formatTime(seconds) {
