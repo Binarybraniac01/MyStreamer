@@ -384,16 +384,9 @@ class StreamFlowPlayer {
         // Buffer progress - fires when browser downloads more data
         this.video.addEventListener('progress', () => this.updateBuffer());
 
-        // Also update buffer on seeking + fix audio desync
+        // Also update buffer on seeking
         this.video.addEventListener('seeked', () => {
             this.updateBuffer();
-            // Force audio resync: pause/play cycle fixes decoder desync
-            if (!this.video.paused && !this.video.ended) {
-                this.video.pause();
-                requestAnimationFrame(() => {
-                    this.video.play().catch(() => {});
-                });
-            }
         });
 
         // Detect text tracks added asynchronously
@@ -417,13 +410,15 @@ class StreamFlowPlayer {
 
         // Check if proxy should be used
         const useProxy = this.useProxyCheckbox && this.useProxyCheckbox.checked;
-        if (useProxy) {
-            // Use proxy endpoint (works with both local server.js and Vercel serverless function)
+        const isMKV = url.toLowerCase().includes('.mkv');
+
+        // Auto-enable proxy for MKV files (fixes CORS + MIME type)
+        if (useProxy || isMKV) {
             const proxyBase = window.location.hostname === 'localhost'
                 ? 'http://localhost:4000/proxy'
                 : '/api/proxy';
             url = `${proxyBase}?url=${encodeURIComponent(url)}`;
-            console.log('🔄 Using proxy server for URL');
+            console.log(isMKV ? '🎬 MKV detected - auto-routing through proxy' : '🔄 Using proxy server for URL');
         }
 
         this.currentUrl = url;
@@ -1242,7 +1237,7 @@ class StreamFlowPlayer {
                     message = 'Network error - check your connection or the URL may have expired';
                     break;
                 case MediaError.MEDIA_ERR_DECODE:
-                    if (this.isMKV(this.currentUrl)) {
+                    if (this.isMKV(this.originalUrl)) {
                         message = 'MKV codec not supported by browser.\n\n• H.265/HEVC is not supported\n• Try a file with H.264 video + AAC audio\n• Or use VLC/mpv for local playback';
                     } else {
                         message = 'Video format not supported by browser';
@@ -1265,26 +1260,14 @@ class StreamFlowPlayer {
                         this.video.load();
                         return;
                     }
-                    // For MKV files, try via proxy (fixes MIME type issues)
-                    if (this.isMKV(this.currentUrl) && !this.triedProxy) {
-                        this.triedProxy = true;
-                        const proxyBase = window.location.hostname === 'localhost'
-                            ? 'http://localhost:4000/proxy'
-                            : '/api/proxy';
-                        const proxyUrl = `${proxyBase}?url=${encodeURIComponent(this.currentUrl)}`;
-                        console.log('🔄 MKV failed - retrying via proxy for correct MIME type...');
-                        this.video.src = proxyUrl;
-                        this.video.load();
-                        return;
-                    }
 
                     // Check if it's a Google URL for specific message
                     const isGoogleUrl = this.currentUrl.includes('googleusercontent.com') ||
                         this.currentUrl.includes('googlevideo.com');
                     if (isGoogleUrl) {
                         message = 'Google video URL has expired!\n\nGoogle download links are only valid for a few hours.\nPlease get a fresh download URL.';
-                    } else if (this.isMKV(this.currentUrl)) {
-                        message = 'MKV file cannot be played.\n\n• Codec may not be supported (H.265?)\n• Try enabling proxy toggle\n• Use external subtitle file if needed';
+                    } else if (this.isMKV(this.originalUrl)) {
+                        message = 'MKV file cannot be played.\n\n• Codec may not be supported (H.265?)\n• The audio codec may be unsupported\n• Use external subtitle file if needed';
                     } else {
                         message = 'Video cannot be played.\n\n• URL may be expired or invalid\n• Server may block external access\n• Format may not be supported';
                     }
@@ -1412,13 +1395,16 @@ class StreamFlowPlayer {
         this.populateSubtitles();
 
         // For MKV files, parse the header to extract embedded track info
-        const url = this.currentUrl || '';
-        if (this.isMKV(url) && window.MKVParser) {
-            this.parseMKVTracks(url);
+        // Use originalUrl to detect MKV, but currentUrl (proxied) for actual fetch
+        const origUrl = this.originalUrl || '';
+        const fetchUrl = this.currentUrl || '';
+        if (this.isMKV(origUrl) && window.MKVParser) {
+            this.parseMKVTracks(fetchUrl);
         }
     }
 
     isMKV(url) {
+        if (!url) return false;
         const lower = url.toLowerCase();
         return lower.includes('.mkv') || lower.includes('matroska');
     }
