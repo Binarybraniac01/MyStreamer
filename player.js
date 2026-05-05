@@ -61,32 +61,50 @@ class StreamFlowPlayer {
         this.shortcutsModal = document.getElementById('shortcutsModal');
         this.closeShortcuts = document.getElementById('closeShortcuts');
 
+        // Settings Menu
+        this.settingsBtn = document.getElementById('settingsBtn');
+        this.settingsMenu = document.getElementById('settingsMenu');
+        this.settingsContainer = document.getElementById('settingsContainer');
+        this.audioTrackOptions = document.getElementById('audioTrackOptions');
+        this.subtitleOptions = document.getElementById('subtitleOptions');
+        this.seekDurationOptions = document.getElementById('seekDurationOptions');
+
+        // Lock
+        this.lockBtn = document.getElementById('lockBtn');
+        this.lockOverlay = document.getElementById('lockOverlay');
+        this.lockUnlockBtn = document.getElementById('lockUnlockBtn');
+
         // State
         this.isPlaying = false;
         this.isMuted = false;
         this.isFullscreen = false;
+        this.isLocked = false;
         this.controlsTimeout = null;
         this.cursorTimeout = null;
         this.lastVolume = 1;
         this.currentUrl = '';
         this.loadStartTime = 0;
         this.bytesLoaded = 0;
+        this.seekDuration = parseInt(localStorage.getItem('seekDuration')) || 5;
+
+        // HLS instance reference for track management
+        this.hlsInstance = null;
 
         // Buffer Management
         this.bufferCheckInterval = null;
-        this.targetBufferAhead = 60; // seconds to buffer ahead
-        this.historyBufferRatio = 0.10; // 10% of watched video as history buffer
-        this.maxWatchedPosition = 0; // track furthest watched position
-        this.bufferRanges = []; // store all buffer ranges for visualization
+        this.targetBufferAhead = 60;
+        this.historyBufferRatio = 0.10;
+        this.maxWatchedPosition = 0;
+        this.bufferRanges = [];
 
         // Network speed tracking
         this.lastBufferTime = 0;
         this.lastBufferedAmount = 0;
         this.networkSpeedSamples = [];
-        this.maxSpeedSamples = 10; // rolling average of last 10 samples
+        this.maxSpeedSamples = 10;
 
         // Range request support detection
-        this.supportsRangeRequests = null; // null = unknown, true/false after check
+        this.supportsRangeRequests = null;
         this.rangeRequestChecked = false;
 
         this.init();
@@ -96,6 +114,7 @@ class StreamFlowPlayer {
         this.bindEvents();
         this.setupVideoEvents();
         this.updateVolumeUI();
+        this.applySeekDuration(this.seekDuration);
 
         // Focus input on load
         this.urlInput.focus();
@@ -121,8 +140,8 @@ class StreamFlowPlayer {
         // Play Controls
         this.playPauseBtn.addEventListener('click', () => this.togglePlay());
         this.bigPlayBtn.addEventListener('click', () => this.togglePlay());
-        this.skipBackBtn.addEventListener('click', () => this.skip(-10));
-        this.skipForwardBtn.addEventListener('click', () => this.skip(10));
+        this.skipBackBtn.addEventListener('click', () => this.skip(-this.seekDuration));
+        this.skipForwardBtn.addEventListener('click', () => this.skip(this.seekDuration));
 
         // Volume
         this.muteBtn.addEventListener('click', () => this.toggleMute());
@@ -208,9 +227,34 @@ class StreamFlowPlayer {
         }
 
         // Close speed menu when clicking outside
-        document.addEventListener('click', () => {
+        document.addEventListener('click', (e) => {
+            if (!this.speedMenu.contains(e.target) && e.target !== this.speedBtn) {
+                this.speedMenu.classList.remove('active');
+            }
+            if (this.settingsContainer && !this.settingsContainer.contains(e.target)) {
+                this.settingsMenu.classList.remove('active');
+            }
+        });
+
+        // Settings Menu
+        this.settingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.settingsMenu.classList.toggle('active');
             this.speedMenu.classList.remove('active');
         });
+
+        // Seek Duration buttons
+        this.seekDurationOptions.querySelectorAll('.seek-duration-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const dur = parseInt(e.target.dataset.seek);
+                this.applySeekDuration(dur);
+            });
+        });
+
+        // Lock Button
+        this.lockBtn.addEventListener('click', () => this.toggleLock());
+        this.lockUnlockBtn.addEventListener('click', () => this.toggleLock());
 
         // Shortcuts Modal
         this.closeShortcuts.addEventListener('click', () => {
@@ -224,11 +268,15 @@ class StreamFlowPlayer {
         this.playerContainer.addEventListener('mousemove', () => this.showControls());
         this.playerContainer.addEventListener('mouseleave', () => this.hideControls());
 
-        // Click to play/pause
-        this.video.addEventListener('click', () => this.togglePlay());
+        // Click to play/pause (only if not locked)
+        this.video.addEventListener('click', () => {
+            if (!this.isLocked) this.togglePlay();
+        });
 
-        // Double-click to fullscreen
-        this.video.addEventListener('dblclick', () => this.toggleFullscreen());
+        // Double-click to fullscreen (only if not locked)
+        this.video.addEventListener('dblclick', () => {
+            if (!this.isLocked) this.toggleFullscreen();
+        });
 
         // Fullscreen change
         document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
@@ -257,6 +305,8 @@ class StreamFlowPlayer {
             this.startBufferManagement();
             // Initialize speed status
             this.updateSpeedStatus();
+            // Detect audio tracks and subtitles
+            this.detectTracks();
 
             console.log(`Video loaded: ${this.formatTime(this.video.duration)} duration`);
         });
@@ -475,16 +525,21 @@ class StreamFlowPlayer {
             this.video.load();
         } else if (typeof Hls !== 'undefined') {
             // Use hls.js for other browsers
+            if (this.hlsInstance) {
+                this.hlsInstance.destroy();
+            }
             const hls = new Hls({
                 maxBufferLength: 60,
                 maxMaxBufferLength: 120,
                 maxBufferSize: 60 * 1000 * 1000, // 60MB
                 maxBufferHole: 0.5,
             });
+            this.hlsInstance = hls;
             hls.loadSource(url);
             hls.attachMedia(this.video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 this.hideLoading();
+                this.detectTracks();
             });
             hls.on(Hls.Events.ERROR, (event, data) => {
                 if (data.fatal) {
@@ -1035,12 +1090,12 @@ class StreamFlowPlayer {
         if (this.isPlaying) {
             this.controlsTimeout = setTimeout(() => {
                 this.playerContainer.classList.remove('show-controls');
-            }, 3000);
+            }, 1000);
 
             if (this.isFullscreen) {
                 this.cursorTimeout = setTimeout(() => {
                     this.playerContainer.classList.add('hide-cursor');
-                }, 3000);
+                }, 1000);
             }
         }
     }
@@ -1054,8 +1109,9 @@ class StreamFlowPlayer {
     handleKeyboard(e) {
         // Don't handle if typing in input
         if (e.target.tagName === 'INPUT') return;
-
+        // Don't handle if locked (except 'l' to unlock)
         const key = e.key.toLowerCase();
+        if (this.isLocked && key !== 'l') return;
 
         switch (key) {
             case ' ':
@@ -1077,15 +1133,18 @@ class StreamFlowPlayer {
                 e.preventDefault();
                 this.togglePiP();
                 break;
+            case 'l':
+                e.preventDefault();
+                this.toggleLock();
+                break;
             case 'arrowleft':
             case 'j':
                 e.preventDefault();
-                this.skip(-10);
+                this.skip(-this.seekDuration);
                 break;
             case 'arrowright':
-            case 'l':
                 e.preventDefault();
-                this.skip(10);
+                this.skip(this.seekDuration);
                 break;
             case 'arrowup':
                 e.preventDefault();
@@ -1227,6 +1286,191 @@ class StreamFlowPlayer {
         window.history.replaceState({}, '', newUrl);
 
         this.urlInput.focus();
+
+        // Unlock if locked
+        if (this.isLocked) this.toggleLock();
+
+        // Reset tracks UI
+        this.audioTrackOptions.innerHTML = '<div class="settings-empty">No extra audio tracks</div>';
+        this.subtitleOptions.innerHTML = '<div class="settings-empty">No subtitles available</div>';
+    }
+
+    // ===========================
+    //  LOCK / UNLOCK
+    // ===========================
+
+    toggleLock() {
+        this.isLocked = !this.isLocked;
+        this.playerContainer.classList.toggle('player-locked', this.isLocked);
+        this.lockOverlay.classList.toggle('active', this.isLocked);
+
+        if (this.isLocked) {
+            // Hide controls immediately
+            this.playerContainer.classList.remove('show-controls');
+            clearTimeout(this.controlsTimeout);
+        }
+    }
+
+    // ===========================
+    //  SEEK DURATION
+    // ===========================
+
+    applySeekDuration(dur) {
+        this.seekDuration = dur;
+        localStorage.setItem('seekDuration', dur);
+
+        // Update UI buttons
+        this.seekDurationOptions.querySelectorAll('.seek-duration-btn').forEach(btn => {
+            btn.classList.toggle('active', parseInt(btn.dataset.seek) === dur);
+        });
+
+        // Update skip button titles and SVG text
+        if (this.skipBackBtn) {
+            this.skipBackBtn.title = `Back ${dur}s (←)`;
+            const txt = this.skipBackBtn.querySelector('text');
+            if (txt) txt.textContent = dur;
+        }
+        if (this.skipForwardBtn) {
+            this.skipForwardBtn.title = `Forward ${dur}s (→)`;
+            const txt = this.skipForwardBtn.querySelector('text');
+            if (txt) txt.textContent = dur;
+        }
+    }
+
+    // ===========================
+    //  TRACK DETECTION
+    // ===========================
+
+    detectTracks() {
+        // Try HLS.js tracks first
+        if (this.hlsInstance) {
+            this.populateHLSTracks();
+            return;
+        }
+
+        // Native audio tracks (Safari mainly)
+        this.populateAudioTracks();
+        // Native text tracks (subtitles/captions)
+        this.populateSubtitles();
+    }
+
+    populateHLSTracks() {
+        const hls = this.hlsInstance;
+
+        // Audio tracks from HLS
+        if (hls.audioTracks && hls.audioTracks.length > 1) {
+            this.audioTrackOptions.innerHTML = '';
+            hls.audioTracks.forEach((track, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'settings-option-btn' + (i === hls.audioTrack ? ' active' : '');
+                btn.textContent = track.name || track.lang || `Track ${i + 1}`;
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    hls.audioTrack = i;
+                    this.audioTrackOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+                this.audioTrackOptions.appendChild(btn);
+            });
+        }
+
+        // Subtitle tracks from HLS
+        if (hls.subtitleTracks && hls.subtitleTracks.length > 0) {
+            this.subtitleOptions.innerHTML = '';
+            // Off option
+            const offBtn = document.createElement('button');
+            offBtn.className = 'settings-option-btn active';
+            offBtn.textContent = 'Off';
+            offBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hls.subtitleTrack = -1;
+                this.subtitleOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                offBtn.classList.add('active');
+            });
+            this.subtitleOptions.appendChild(offBtn);
+
+            hls.subtitleTracks.forEach((track, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'settings-option-btn';
+                btn.textContent = track.name || track.lang || `Subtitle ${i + 1}`;
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    hls.subtitleTrack = i;
+                    hls.subtitleDisplay = true;
+                    this.subtitleOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+                this.subtitleOptions.appendChild(btn);
+            });
+        }
+    }
+
+    populateAudioTracks() {
+        const tracks = this.video.audioTracks;
+        if (!tracks || tracks.length <= 1) return;
+
+        this.audioTrackOptions.innerHTML = '';
+        for (let i = 0; i < tracks.length; i++) {
+            const track = tracks[i];
+            const btn = document.createElement('button');
+            btn.className = 'settings-option-btn' + (track.enabled ? ' active' : '');
+            btn.textContent = track.label || track.language || `Track ${i + 1}`;
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Disable all, enable selected
+                for (let j = 0; j < tracks.length; j++) {
+                    tracks[j].enabled = (j === i);
+                }
+                this.audioTrackOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+            this.audioTrackOptions.appendChild(btn);
+        }
+    }
+
+    populateSubtitles() {
+        const tracks = this.video.textTracks;
+        if (!tracks || tracks.length === 0) return;
+
+        this.subtitleOptions.innerHTML = '';
+
+        // Off option
+        const offBtn = document.createElement('button');
+        offBtn.className = 'settings-option-btn active';
+        offBtn.textContent = 'Off';
+        offBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            for (let i = 0; i < tracks.length; i++) {
+                tracks[i].mode = 'disabled';
+            }
+            this.subtitleOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+            offBtn.classList.add('active');
+        });
+        this.subtitleOptions.appendChild(offBtn);
+
+        for (let i = 0; i < tracks.length; i++) {
+            const track = tracks[i];
+            if (track.kind === 'subtitles' || track.kind === 'captions') {
+                const btn = document.createElement('button');
+                btn.className = 'settings-option-btn' + (track.mode === 'showing' ? ' active' : '');
+                btn.textContent = track.label || track.language || `Subtitle ${i + 1}`;
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    for (let j = 0; j < tracks.length; j++) {
+                        tracks[j].mode = 'disabled';
+                    }
+                    track.mode = 'showing';
+                    this.subtitleOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+                this.subtitleOptions.appendChild(btn);
+            }
+        }
+
+        // If only "Off" button exists, show no subtitles message
+        if (this.subtitleOptions.children.length <= 1) {
+            this.subtitleOptions.innerHTML = '<div class="settings-empty">No subtitles available</div>';
+        }
     }
 
     formatTime(seconds) {

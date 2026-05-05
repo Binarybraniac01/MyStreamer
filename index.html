@@ -87,6 +87,7 @@
                     <div class="supported-formats">
                         <span class="format-tag">MP4</span>
                         <span class="format-tag">WebM</span>
+                        <span class="format-tag">MKV</span>
                         <span class="format-tag">OGG</span>
                         <span class="format-tag">HLS</span>
                         <span class="format-tag">DASH</span>
@@ -143,6 +144,17 @@
                                 <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2" opacity="0.3" />
                                 <path d="M26 20v24l20-12-20-12z" fill="currentColor" />
                             </svg>
+                        </button>
+                    </div>
+
+                    <!-- Lock Overlay (shown when player is locked) -->
+                    <div class="lock-overlay" id="lockOverlay">
+                        <button class="lock-unlock-btn" id="lockUnlockBtn" title="Tap to Unlock">
+                            <svg viewBox="0 0 24 24" fill="none">
+                                <rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="2"/>
+                                <path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                            <span>Tap to unlock</span>
                         </button>
                     </div>
 
@@ -267,6 +279,69 @@
                                     </div>
                                 </div>
 
+                                <!-- Settings (Audio/Subtitle/Seek) -->
+                                <div class="settings-container" id="settingsContainer">
+                                    <button class="ctrl-btn" id="settingsBtn" title="Settings">
+                                        <svg viewBox="0 0 24 24" fill="none">
+                                            <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="2"/>
+                                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="2"/>
+                                        </svg>
+                                    </button>
+                                    <div class="settings-menu" id="settingsMenu">
+                                        <!-- Audio Track Section -->
+                                        <div class="settings-section" id="audioTrackSection">
+                                            <div class="settings-section-title">
+                                                <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+                                                    <path d="M9 18V5l12-2v13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                                    <circle cx="6" cy="18" r="3" stroke="currentColor" stroke-width="2"/>
+                                                    <circle cx="18" cy="16" r="3" stroke="currentColor" stroke-width="2"/>
+                                                </svg>
+                                                <span>Audio Track</span>
+                                            </div>
+                                            <div class="settings-options" id="audioTrackOptions">
+                                                <div class="settings-empty">No extra audio tracks</div>
+                                            </div>
+                                        </div>
+                                        <!-- Subtitle Section -->
+                                        <div class="settings-section" id="subtitleSection">
+                                            <div class="settings-section-title">
+                                                <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+                                                    <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" stroke-width="2"/>
+                                                    <path d="M6 12h4M14 12h4M8 16h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                                </svg>
+                                                <span>Subtitles</span>
+                                            </div>
+                                            <div class="settings-options" id="subtitleOptions">
+                                                <div class="settings-empty">No subtitles available</div>
+                                            </div>
+                                        </div>
+                                        <!-- Seek Duration Section -->
+                                        <div class="settings-section">
+                                            <div class="settings-section-title">
+                                                <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+                                                    <path d="M11.5 8V4L18 9l-6.5 5v-4C8 10 5 12.9 5 16.5S8 23 11.5 23 18 20.1 18 16.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                                </svg>
+                                                <span>Seek Duration</span>
+                                            </div>
+                                            <div class="seek-duration-options" id="seekDurationOptions">
+                                                <button class="seek-duration-btn" data-seek="2">2s</button>
+                                                <button class="seek-duration-btn" data-seek="3">3s</button>
+                                                <button class="seek-duration-btn active" data-seek="5">5s</button>
+                                                <button class="seek-duration-btn" data-seek="7">7s</button>
+                                                <button class="seek-duration-btn" data-seek="10">10s</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Lock Button -->
+                                <button class="ctrl-btn" id="lockBtn" title="Lock Controls (L)">
+                                    <svg viewBox="0 0 24 24" fill="none">
+                                        <rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="2"/>
+                                        <path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>
+                                </button>
+
                                 <!-- Picture in Picture -->
                                 <button class="ctrl-btn" id="pipBtn" title="Picture in Picture (P)">
                                     <svg viewBox="0 0 24 24" fill="none">
@@ -324,10 +399,11 @@
                     <div class="shortcut"><kbd>F</kbd><span>Fullscreen</span></div>
                     <div class="shortcut"><kbd>M</kbd><span>Mute</span></div>
                     <div class="shortcut"><kbd>P</kbd><span>Picture in Picture</span></div>
-                    <div class="shortcut"><kbd>←</kbd><span>Back 10s</span></div>
-                    <div class="shortcut"><kbd>→</kbd><span>Forward 10s</span></div>
+                    <div class="shortcut"><kbd>←</kbd><span>Seek Back</span></div>
+                    <div class="shortcut"><kbd>→</kbd><span>Seek Forward</span></div>
                     <div class="shortcut"><kbd>↑</kbd><span>Volume Up</span></div>
                     <div class="shortcut"><kbd>↓</kbd><span>Volume Down</span></div>
+                    <div class="shortcut"><kbd>L</kbd><span>Lock/Unlock</span></div>
                     <div class="shortcut"><kbd>0-9</kbd><span>Jump to 0%-90%</span></div>
                     <div class="shortcut"><kbd>Click</kbd><span>Jump to Time</span></div>
                 </div>
