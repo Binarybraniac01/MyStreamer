@@ -93,10 +93,26 @@ function proxyVideo(videoUrl, clientReq, clientRes, redirectCount = 0) {
 
             // Forward response headers
             const responseHeaders = {
-                'Content-Type': proxyRes.headers['content-type'] || 'video/mp4',
                 'Accept-Ranges': 'bytes',
                 'Cache-Control': 'no-cache'
             };
+
+            // Determine correct Content-Type
+            let contentType = proxyRes.headers['content-type'] || 'video/mp4';
+            // Fix content-type for MKV files (servers often send application/octet-stream)
+            const urlLower = videoUrl.toLowerCase();
+            if (urlLower.includes('.mkv')) {
+                contentType = 'video/x-matroska';
+            } else if (urlLower.includes('.webm')) {
+                contentType = 'video/webm';
+            } else if (urlLower.includes('.mp4') || urlLower.includes('.m4v')) {
+                contentType = 'video/mp4';
+            } else if (urlLower.includes('.ogg') || urlLower.includes('.ogv')) {
+                contentType = 'video/ogg';
+            } else if (contentType === 'application/octet-stream') {
+                contentType = 'video/mp4'; // Default fallback
+            }
+            responseHeaders['Content-Type'] = contentType;
 
             if (proxyRes.headers['content-length']) {
                 responseHeaders['Content-Length'] = proxyRes.headers['content-length'];

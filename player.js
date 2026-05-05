@@ -441,6 +441,7 @@ class StreamFlowPlayer {
         // Reset CORS retry flags
         this.triedWithoutCors = false;
         this.triedWithCors = false;
+        this.triedProxy = false;
         this.rangeRequestChecked = false;
 
         // Check if HLS stream
@@ -1241,7 +1242,11 @@ class StreamFlowPlayer {
                     message = 'Network error - check your connection or the URL may have expired';
                     break;
                 case MediaError.MEDIA_ERR_DECODE:
-                    message = 'Video format not supported by browser';
+                    if (this.isMKV(this.currentUrl)) {
+                        message = 'MKV codec not supported by browser.\n\n• H.265/HEVC is not supported\n• Try a file with H.264 video + AAC audio\n• Or use VLC/mpv for local playback';
+                    } else {
+                        message = 'Video format not supported by browser';
+                    }
                     break;
                 case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
                     // Try without crossorigin attribute if it was set
@@ -1260,12 +1265,26 @@ class StreamFlowPlayer {
                         this.video.load();
                         return;
                     }
+                    // For MKV files, try via proxy (fixes MIME type issues)
+                    if (this.isMKV(this.currentUrl) && !this.triedProxy) {
+                        this.triedProxy = true;
+                        const proxyBase = window.location.hostname === 'localhost'
+                            ? 'http://localhost:4000/proxy'
+                            : '/api/proxy';
+                        const proxyUrl = `${proxyBase}?url=${encodeURIComponent(this.currentUrl)}`;
+                        console.log('🔄 MKV failed - retrying via proxy for correct MIME type...');
+                        this.video.src = proxyUrl;
+                        this.video.load();
+                        return;
+                    }
 
                     // Check if it's a Google URL for specific message
                     const isGoogleUrl = this.currentUrl.includes('googleusercontent.com') ||
                         this.currentUrl.includes('googlevideo.com');
                     if (isGoogleUrl) {
                         message = 'Google video URL has expired!\n\nGoogle download links are only valid for a few hours.\nPlease get a fresh download URL.';
+                    } else if (this.isMKV(this.currentUrl)) {
+                        message = 'MKV file cannot be played.\n\n• Codec may not be supported (H.265?)\n• Try enabling proxy toggle\n• Use external subtitle file if needed';
                     } else {
                         message = 'Video cannot be played.\n\n• URL may be expired or invalid\n• Server may block external access\n• Format may not be supported';
                     }
@@ -1391,6 +1410,129 @@ class StreamFlowPlayer {
         this.populateAudioTracks();
         // Native text tracks (subtitles/captions)
         this.populateSubtitles();
+
+        // For MKV files, parse the header to extract embedded track info
+        const url = this.currentUrl || '';
+        if (this.isMKV(url) && window.MKVParser) {
+            this.parseMKVTracks(url);
+        }
+    }
+
+    isMKV(url) {
+        const lower = url.toLowerCase();
+        return lower.includes('.mkv') || lower.includes('matroska');
+    }
+
+    async parseMKVTracks(url) {
+        const parser = new MKVParser();
+        const result = await parser.parse(url);
+
+        if (!result.tracks || result.tracks.length === 0) return;
+
+        const audioTracks = result.tracks.filter(t => t.type === 'audio');
+        const subTracks = result.tracks.filter(t => t.type === 'subtitle');
+
+        // Populate audio tracks from MKV header
+        if (audioTracks.length > 0) {
+            this.audioTrackOptions.innerHTML = '';
+
+            if (audioTracks.length === 1) {
+                // Single audio track - just show info
+                const t = audioTracks[0];
+                const codec = MKVParser.getCodecName(t.codecId);
+                const lang = MKVParser.getLanguageName(t.language);
+                const chStr = t.channels ? ` · ${t.channels}ch` : '';
+                const info = document.createElement('div');
+                info.className = 'settings-empty';
+                info.textContent = `${lang} (${codec}${chStr})`;
+                this.audioTrackOptions.appendChild(info);
+            } else {
+                // Multiple audio tracks - show as list (info only in Chrome, switchable in Safari)
+                audioTracks.forEach((t, i) => {
+                    const codec = MKVParser.getCodecName(t.codecId);
+                    const lang = MKVParser.getLanguageName(t.language);
+                    const name = t.name || lang;
+                    const chStr = t.channels ? ` · ${t.channels}ch` : '';
+
+                    const btn = document.createElement('button');
+                    btn.className = 'settings-option-btn' + (i === 0 ? ' active' : '');
+                    btn.innerHTML = `<span>${name}</span><small style="opacity:0.5;margin-left:6px">${codec}${chStr}</small>`;
+
+                    // Try native audioTracks switching if available
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const nativeTracks = this.video.audioTracks;
+                        if (nativeTracks && nativeTracks.length > i) {
+                            for (let j = 0; j < nativeTracks.length; j++) {
+                                nativeTracks[j].enabled = (j === i);
+                            }
+                        }
+                        this.audioTrackOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                    });
+
+                    this.audioTrackOptions.appendChild(btn);
+                });
+            }
+        }
+
+        // Populate subtitle tracks from MKV header
+        if (subTracks.length > 0) {
+            this.subtitleOptions.innerHTML = '';
+
+            // Off option
+            const offBtn = document.createElement('button');
+            offBtn.className = 'settings-option-btn active';
+            offBtn.textContent = 'Off';
+            offBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const tracks = this.video.textTracks;
+                for (let i = 0; i < tracks.length; i++) {
+                    tracks[i].mode = 'disabled';
+                }
+                this.subtitleOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                offBtn.classList.add('active');
+            });
+            this.subtitleOptions.appendChild(offBtn);
+
+            subTracks.forEach((t, i) => {
+                const codec = MKVParser.getCodecName(t.codecId);
+                const lang = MKVParser.getLanguageName(t.language);
+                const name = t.name || lang;
+                const isText = MKVParser.isTextSubtitle(t.codecId);
+
+                const btn = document.createElement('button');
+                btn.className = 'settings-option-btn';
+                btn.innerHTML = `<span>${name}</span><small style="opacity:0.5;margin-left:6px">${codec}</small>`;
+
+                if (!isText) {
+                    // Bitmap subtitle (PGS, VobSub) - not extractable
+                    btn.innerHTML += `<small style="opacity:0.4;margin-left:4px;color:var(--warning)">(image-based)</small>`;
+                    btn.style.opacity = '0.5';
+                    btn.title = 'Image-based subtitles cannot be rendered in browser. Use external .srt file instead.';
+                } else {
+                    btn.title = `Text subtitle (${codec}) - detected in MKV header`;
+                }
+
+                // Try activating native text track if available
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const nativeTracks = this.video.textTracks;
+                    // Disable all
+                    for (let j = 0; j < nativeTracks.length; j++) {
+                        nativeTracks[j].mode = 'disabled';
+                    }
+                    // Try to enable matching track
+                    if (nativeTracks.length > i) {
+                        nativeTracks[i].mode = 'showing';
+                    }
+                    this.subtitleOptions.querySelectorAll('.settings-option-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+
+                this.subtitleOptions.appendChild(btn);
+            });
+        }
     }
 
     populateHLSTracks() {
